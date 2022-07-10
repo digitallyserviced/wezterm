@@ -102,6 +102,15 @@ pub struct Config {
     #[dynamic(default = "default_pane_select_bg_color")]
     pub pane_select_bg_color: RgbaColor,
 
+    #[dynamic(default = "default_confirm_prompt_font_size")]
+    pub confirm_prompt_font_size: f64,
+
+    #[dynamic(default = "default_confirm_prompt_fg_color")]
+    pub confirm_prompt_fg_color: RgbaColor,
+
+    #[dynamic(default = "default_confirm_prompt_bg_color")]
+    pub confirm_prompt_bg_color: RgbaColor,
+
     #[dynamic(default)]
     pub tab_bar_style: TabBarStyle,
 
@@ -1165,6 +1174,18 @@ fn default_pane_select_bg_color() -> RgbaColor {
 }
 
 fn default_pane_select_font_size() -> f64 {
+    36.0
+}
+
+fn default_confirm_prompt_fg_color() -> RgbaColor {
+    SrgbaTuple(0.75, 0.75, 0.75, 1.0).into()
+}
+
+fn default_confirm_prompt_bg_color() -> RgbaColor {
+    SrgbaTuple(0., 0., 0., 0.5).into()
+}
+
+fn default_confirm_prompt_font_size() -> f64 {
     36.0
 }
 

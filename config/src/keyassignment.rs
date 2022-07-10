@@ -275,7 +275,6 @@ impl Default for PaneSelectMode {
         Self::Activate
     }
 }
-
 #[derive(Default, Debug, Clone, PartialEq, Eq, FromDynamic, ToDynamic)]
 pub struct PaneSelectArguments {
     /// Overrides the main quick_select_alphabet config
@@ -284,6 +283,28 @@ pub struct PaneSelectArguments {
 
     #[dynamic(default)]
     pub mode: PaneSelectMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromDynamic, ToDynamic)]
+pub enum ConfirmPromptMode {
+    YesNo,
+    AnyKey,
+}
+impl Default for ConfirmPromptMode {
+    fn default() -> Self {
+        Self::AnyKey
+    }
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Eq, FromDynamic, ToDynamic)]
+pub struct ConfirmPromptArguments {
+
+    /// Overrides the main quick_select_alphabet config
+    #[dynamic(default)]
+    pub prompt: String,
+
+    #[dynamic(default)]
+    pub mode: ConfirmPromptMode,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, FromDynamic, ToDynamic)]
@@ -395,6 +416,7 @@ pub enum KeyAssignment {
     RotatePanes(RotationDirection),
     SplitPane(SplitPane),
     PaneSelect(PaneSelectArguments),
+    ConfirmPrompt(ConfirmPromptArguments),
 }
 impl_lua_conversion_dynamic!(KeyAssignment);
 

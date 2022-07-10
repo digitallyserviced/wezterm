@@ -1944,6 +1944,8 @@ impl TermWindow {
         if pane.perform_assignment(assignment) {
             return Ok(());
         }
+        
+        let pane_id = pane.pane_id();
 
         let window = self.window.as_ref().map(|w| w.clone());
 
@@ -2439,6 +2441,12 @@ impl TermWindow {
             }
             PaneSelect(args) => {
                 let modal = crate::termwindow::paneselect::PaneSelector::new(self, args);
+                self.modal.borrow_mut().replace(Rc::new(modal));
+            }
+            ConfirmPrompt(args) => {
+
+                let pane_index = self.get_tab_information().iter().find(|t| t.is_active).map(|t| t.clone().active_pane.unwrap().pane_index);
+                let modal = crate::termwindow::paneselect::ConfirmPrompt::new(self,pane_index.unwrap() , args);
                 self.modal.borrow_mut().replace(Rc::new(modal));
             }
         };

@@ -441,6 +441,7 @@ struct FontConfigInner {
     built_in: RefCell<Arc<FontDatabase>>,
     title_font: RefCell<Option<Rc<LoadedFont>>>,
     pane_select_font: RefCell<Option<Rc<LoadedFont>>>,
+    confirm_prompt_font: RefCell<Option<Rc<LoadedFont>>>,
     fallback_channel: RefCell<Option<Sender<FallbackResolveInfo>>>,
 }
 
@@ -460,6 +461,7 @@ impl FontConfigInner {
             metrics: RefCell::new(None),
             title_font: RefCell::new(None),
             pane_select_font: RefCell::new(None),
+            confirm_prompt_font: RefCell::new(None),
             font_scale: RefCell::new(1.0),
             dpi: RefCell::new(dpi),
             config: RefCell::new(config.clone()),
@@ -476,6 +478,7 @@ impl FontConfigInner {
         fonts.clear();
         self.title_font.borrow_mut().take();
         self.pane_select_font.borrow_mut().take();
+        self.confirm_prompt_font.borrow_mut().take();
         self.metrics.borrow_mut().take();
         *self.font_dirs.borrow_mut() = Arc::new(FontDatabase::with_font_dirs(config)?);
         Ok(())
@@ -611,6 +614,22 @@ impl FontConfigInner {
         let loaded = self.make_title_font_impl(myself, config.window_frame.font_size)?;
 
         title_font.replace(Rc::clone(&loaded));
+
+        Ok(loaded)
+    }
+
+    fn confirm_prompt_font(&self, myself: &Rc<Self>) -> anyhow::Result<Rc<LoadedFont>> {
+        let config = self.config.borrow();
+
+        let mut confirm_prompt_font = self.confirm_prompt_font.borrow_mut();
+
+        if let Some(entry) = confirm_prompt_font.as_ref() {
+            return Ok(Rc::clone(entry));
+        }
+
+        let loaded = self.make_title_font_impl(myself, Some(config.confirm_prompt_font_size))?;
+
+        confirm_prompt_font.replace(Rc::clone(&loaded));
 
         Ok(loaded)
     }
@@ -971,6 +990,10 @@ impl FontConfiguration {
 
     pub fn pane_select_font(&self) -> anyhow::Result<Rc<LoadedFont>> {
         self.inner.pane_select_font(&self.inner)
+    }
+
+    pub fn confirm_prompt_font(&self) -> anyhow::Result<Rc<LoadedFont>> {
+        self.inner.confirm_prompt_font(&self.inner)
     }
 
     /// Given a text style, load (with caching) the font that best
