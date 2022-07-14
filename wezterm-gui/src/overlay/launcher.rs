@@ -8,12 +8,12 @@
 use crate::inputmap::InputMap;
 use crate::termwindow::TermWindowNotif;
 use config::configuration;
-use config::keyassignment::{KeyAssignment, SpawnCommand, SpawnTabDomain};
+use config::keyassignment::{KeyAssignment, KeyTableEntry, SpawnCommand, SpawnTabDomain};
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
 use mux::domain::{DomainId, DomainState};
 use mux::pane::PaneId;
-use mux::tab::TabId;
+use mux::tab::{Tab, TabId};
 use mux::termwiztermtab::TermWizTerminal;
 use mux::window::WindowId;
 use mux::Mux;
@@ -28,12 +28,64 @@ use window::WindowOps;
 
 pub use config::keyassignment::LauncherFlags;
 
-#[derive(Clone)]
+#[cfg_attr(feature = "use_serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug)]
+pub enum LauncherEntryType {
+    Tab(LauncherTabEntry),
+    Domain(LauncherDomainEntry),
+    KeyAssignment(LauncherKeyEntry),
+    Workspace(Entry),
+    Normal(Entry),
+}
+
+#[derive(Clone, Debug)]
 struct Entry {
     pub label: String,
     pub action: KeyAssignment,
 }
 
+pub trait LauncherItem {
+    fn get_entry(&self, idx: usize) -> LauncherEntry;
+}
+
+impl LauncherItem for Tab {
+    fn get_entry(&self, idx: usize) -> LauncherEntry {
+        LauncherEntry {
+            label: format!("{}. {} panes", self.get_title(), self.count_panes()),
+            action: KeyAssignment::ActivateTab(idx as isize),
+            launch_type: (LauncherEntryType::Tab(LauncherTabEntry {
+                title: self.get_title(),
+                tab_id: self.get_active_idx(),
+                tab_idx: idx,
+                pane_count: self.count_panes(),
+            })),
+        }
+    }
+    // add code here
+}
+
+#[derive(Clone, Debug)]
+pub struct LauncherEntry {
+    pub label: String,
+    pub action: KeyAssignment,
+    pub launch_type: LauncherEntryType,
+}
+
+// impl Entry {
+//     fn launch_type(&self) -> &LauncherEntryType {
+//         &self.launch_type
+//     }
+// }
+
+#[cfg_attr(feature = "use_serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug)]
+pub struct LauncherKeyEntry {
+    pub code: KeyCode,
+    pub mods: Modifiers,
+    pub assignment: KeyTableEntry,
+}
+
+#[derive(Clone, Debug)]
 pub struct LauncherTabEntry {
     pub title: String,
     pub tab_id: TabId,
@@ -41,7 +93,7 @@ pub struct LauncherTabEntry {
     pub pane_count: usize,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LauncherDomainEntry {
     pub domain_id: DomainId,
     pub name: String,
@@ -53,6 +105,7 @@ pub struct LauncherArgs {
     flags: LauncherFlags,
     domains: Vec<LauncherDomainEntry>,
     tabs: Vec<LauncherTabEntry>,
+    entries: Vec<LauncherEntry>,
     pane_id: PaneId,
     domain_id_of_current_tab: DomainId,
     title: String,
@@ -79,6 +132,22 @@ impl LauncherArgs {
             vec![]
         };
 
+        let entries = if flags.contains(LauncherFlags::TABS) {
+            // Ideally we'd resolve the tabs on the fly once we've started the
+            // overlay, but since the overlay runs in a different thread, accessing
+            // the mux list is a bit awkward.  To get the ball rolling we capture
+            // the list of tabs up front and live with a static list.
+            let window = mux
+                .get_window(mux_window_id)
+                .expect("to resolve my own window_id");
+            window
+                .iter()
+                .enumerate()
+                .map(|(tab_idx, tab)| tab.get_entry(tab_idx))
+                .collect()
+        } else {
+            vec![]
+        };
         let tabs = if flags.contains(LauncherFlags::TABS) {
             // Ideally we'd resolve the tabs on the fly once we've started the
             // overlay, but since the overlay runs in a different thread, accessing
@@ -145,6 +214,7 @@ impl LauncherArgs {
             flags,
             domains,
             tabs,
+            entries,
             pane_id,
             domain_id_of_current_tab,
             title: title.to_string(),
@@ -160,9 +230,9 @@ struct LauncherState {
     active_idx: usize,
     max_items: usize,
     top_row: usize,
-    entries: Vec<Entry>,
+    entries: Vec<LauncherEntry>,
     filter_term: String,
-    filtered_entries: Vec<Entry>,
+    filtered_entries: Vec<LauncherEntry>,
     pane_id: PaneId,
     window: ::window::Window,
     filtering: bool,
@@ -210,129 +280,133 @@ impl LauncherState {
         let config = configuration();
         // Pull in the user defined entries from the launch_menu
         // section of the configuration.
-        if args.flags.contains(LauncherFlags::LAUNCH_MENU_ITEMS) {
-            for item in &config.launch_menu {
-                self.entries.push(Entry {
-                    label: match item.label.as_ref() {
-                        Some(label) => label.to_string(),
-                        None => match item.args.as_ref() {
-                            Some(args) => args.join(" "),
-                            None => "(default shell)".to_string(),
-                        },
-                    },
-                    action: KeyAssignment::SpawnCommandInNewTab(item.clone()),
-                });
-            }
+        // if args.flags.contains(LauncherFlags::LAUNCH_MENU_ITEMS) {
+        //     for item in &config.launch_menu {
+        //         self.entries.push(Entry {
+        //             label: match item.label.as_ref() {
+        //                 Some(label) => label.to_string(),
+        //                 None => match item.args.as_ref() {
+        //                     Some(args) => args.join(" "),
+        //                     None => "(default shell)".to_string(),
+        //                 },
+        //             },
+        //             action: KeyAssignment::SpawnCommandInNewTab(item.clone()),
+        //         });
+        //     }
+        // }
+
+        // for domain in &args.domains {
+        //     let entry = if domain.state == DomainState::Attached {
+        //         Entry {
+        //             label: format!("New Tab ({})", domain.label),
+        //             action: KeyAssignment::SpawnCommandInNewTab(SpawnCommand {
+        //                 domain: SpawnTabDomain::DomainName(domain.name.to_string()),
+        //                 ..SpawnCommand::default()
+        //             }),
+        //         }
+        //     } else {
+        //         Entry {
+        //             label: format!("Attach {}", domain.label),
+        //             action: KeyAssignment::AttachDomain(domain.name.to_string()),
+        //         }
+        //     };
+        //
+        //     // Preselect the entry that corresponds to the active tab
+        //     // at the time that the launcher was set up, so that pressing
+        //     // Enter immediately afterwards spawns a tab in the same domain.
+        //     if domain.domain_id == args.domain_id_of_current_tab {
+        //         self.active_idx = self.entries.len();
+        //     }
+        //     self.entries.push(entry);
+        // }
+
+        // if args.flags.contains(LauncherFlags::WORKSPACES) {
+        //     for ws in &args.workspaces {
+        //         if *ws != args.active_workspace {
+        //             self.entries.push(Entry {
+        //                 label: format!("Switch to workspace: `{}`", ws),
+        //                 action: KeyAssignment::SwitchToWorkspace {
+        //                     name: Some(ws.clone()),
+        //                     spawn: None,
+        //                 },
+        //             });
+        //         }
+        //     }
+        //     self.entries.push(Entry {
+        //         label: format!(
+        //             "Create new Workspace (current is `{}`)",
+        //             args.active_workspace
+        //         ),
+        //         action: KeyAssignment::SwitchToWorkspace {
+        //             name: None,
+        //             spawn: None,
+        //         },
+        //     });
+        // }
+
+        for entry in &args.entries {
+            self.entries.push(entry.to_owned());
         }
 
-        for domain in &args.domains {
-            let entry = if domain.state == DomainState::Attached {
-                Entry {
-                    label: format!("New Tab ({})", domain.label),
-                    action: KeyAssignment::SpawnCommandInNewTab(SpawnCommand {
-                        domain: SpawnTabDomain::DomainName(domain.name.to_string()),
-                        ..SpawnCommand::default()
-                    }),
-                }
-            } else {
-                Entry {
-                    label: format!("Attach {}", domain.label),
-                    action: KeyAssignment::AttachDomain(domain.name.to_string()),
-                }
-            };
-
-            // Preselect the entry that corresponds to the active tab
-            // at the time that the launcher was set up, so that pressing
-            // Enter immediately afterwards spawns a tab in the same domain.
-            if domain.domain_id == args.domain_id_of_current_tab {
-                self.active_idx = self.entries.len();
-            }
-            self.entries.push(entry);
-        }
-
-        if args.flags.contains(LauncherFlags::WORKSPACES) {
-            for ws in &args.workspaces {
-                if *ws != args.active_workspace {
-                    self.entries.push(Entry {
-                        label: format!("Switch to workspace: `{}`", ws),
-                        action: KeyAssignment::SwitchToWorkspace {
-                            name: Some(ws.clone()),
-                            spawn: None,
-                        },
-                    });
-                }
-            }
-            self.entries.push(Entry {
-                label: format!(
-                    "Create new Workspace (current is `{}`)",
-                    args.active_workspace
-                ),
-                action: KeyAssignment::SwitchToWorkspace {
-                    name: None,
-                    spawn: None,
-                },
-            });
-        }
-
-        for tab in &args.tabs {
-            self.entries.push(Entry {
-                label: format!("{}. {} panes", tab.title, tab.pane_count),
-                action: KeyAssignment::ActivateTab(tab.tab_idx as isize),
-            });
-        }
-
-        if args.flags.contains(LauncherFlags::COMMANDS) {
-            let commands = crate::commands::CommandDef::expanded_commands(&config);
-            for cmd in commands {
-                if matches!(
-                    &cmd.action,
-                    KeyAssignment::ActivateTabRelative(_) | KeyAssignment::ActivateTab(_)
-                ) {
-                    // Filter out some noisy, repetitive entries
-                    continue;
-                }
-                self.entries.push(Entry {
-                    label: format!("{}. {}", cmd.brief, cmd.doc),
-                    action: cmd.action,
-                });
-            }
-        }
-
-        // Grab interesting key assignments and show those as a kind of command palette
-        if args.flags.contains(LauncherFlags::KEY_ASSIGNMENTS) {
-            let input_map = InputMap::new(&config);
-            let mut key_entries: Vec<Entry> = vec![];
-            // Give a consistent order to the entries
-            let keys: BTreeMap<_, _> = input_map.keys.default.into_iter().collect();
-            for ((keycode, mods), entry) in keys {
-                if matches!(
-                    &entry.action,
-                    KeyAssignment::ActivateTabRelative(_) | KeyAssignment::ActivateTab(_)
-                ) {
-                    // Filter out some noisy, repetitive entries
-                    continue;
-                }
-                if key_entries
-                    .iter()
-                    .find(|ent| ent.action == entry.action)
-                    .is_some()
-                {
-                    // Avoid duplicate entries
-                    continue;
-                }
-                key_entries.push(Entry {
-                    label: format!(
-                        "{:?} ({} {})",
-                        entry.action,
-                        mods.to_string(),
-                        keycode.to_string().escape_debug()
-                    ),
-                    action: entry.action,
-                });
-            }
-            key_entries.sort_by(|a, b| a.label.cmp(&b.label));
-            self.entries.append(&mut key_entries);
-        }
+        // for tab in &args.tabs {
+        //     self.entries.push(Entry {
+        //         label: format!("{}. {} panes", tab.title, tab.pane_count),
+        //         action: KeyAssignment::ActivateTab(tab.tab_idx as isize),
+        //     });
+        // }
+        //
+        // if args.flags.contains(LauncherFlags::COMMANDS) {
+        //     let commands = crate::commands::CommandDef::expanded_commands(&config);
+        //     for cmd in commands {
+        //         if matches!(
+        //             &cmd.action,
+        //             KeyAssignment::ActivateTabRelative(_) | KeyAssignment::ActivateTab(_)
+        //         ) {
+        //             // Filter out some noisy, repetitive entries
+        //             continue;
+        //         }
+        //         self.entries.push(Entry {
+        //             label: format!("{}. {}", cmd.brief, cmd.doc),
+        //             action: cmd.action,
+        //         });
+        //     }
+        // }
+        //
+        // // Grab interesting key assignments and show those as a kind of command palette
+        // if args.flags.contains(LauncherFlags::KEY_ASSIGNMENTS) {
+        //     let input_map = InputMap::new(&config);
+        //     let mut key_entries: Vec<Entry> = vec![];
+        //     // Give a consistent order to the entries
+        //     let keys: BTreeMap<_, _> = input_map.keys.default.into_iter().collect();
+        //     for ((keycode, mods), entry) in keys {
+        //         if matches!(
+        //             &entry.action,
+        //             KeyAssignment::ActivateTabRelative(_) | KeyAssignment::ActivateTab(_)
+        //         ) {
+        //             // Filter out some noisy, repetitive entries
+        //             continue;
+        //         }
+        //         if key_entries
+        //             .iter()
+        //             .find(|ent| ent.action == entry.action)
+        //             .is_some()
+        //         {
+        //             // Avoid duplicate entries
+        //             continue;
+        //         }
+        //         key_entries.push(Entry {
+        //             label: format!(
+        //                 "{:?} ({} {})",
+        //                 entry.action,
+        //                 mods.to_string(),
+        //                 keycode.to_string().escape_debug()
+        //             ),
+        //             action: entry.action,
+        //         });
+        //     }
+        //     key_entries.sort_by(|a, b| a.label.cmp(&b.label));
+        //     self.entries.append(&mut key_entries);
+        // }
     }
 
     fn render(&mut self, term: &mut TermWizTerminal) -> termwiz::Result<()> {
