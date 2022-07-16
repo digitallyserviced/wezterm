@@ -15,7 +15,9 @@ use async_trait::async_trait;
 use config::keyassignment::{SpawnCommand, SpawnTabDomain};
 use config::{configuration, ExecDomain, ValueOrFunc, WslDomain};
 use downcast_rs::{impl_downcast, Downcast};
+use luahelper::impl_lua_conversion_dynamic;
 use portable_pty::{native_pty_system, CommandBuilder, PtySystem};
+use wezterm_dynamic::{ToDynamic, FromDynamic};
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -25,11 +27,12 @@ use wezterm_term::TerminalSize;
 static DOMAIN_ID: ::std::sync::atomic::AtomicUsize = ::std::sync::atomic::AtomicUsize::new(0);
 pub type DomainId = usize;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ToDynamic, FromDynamic)]
 pub enum DomainState {
     Detached,
     Attached,
 }
+impl_lua_conversion_dynamic!(DomainState);
 
 pub fn alloc_domain_id() -> DomainId {
     DOMAIN_ID.fetch_add(1, ::std::sync::atomic::Ordering::Relaxed)

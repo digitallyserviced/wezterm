@@ -10,6 +10,7 @@ resolver = "2"
 
 [features]
 default = ["wayland"]
+use_serde = []
 wayland = ["window/wayland"]
 distro-defaults = ["config/distro-defaults"]
 
@@ -22,6 +23,7 @@ cc = "1.0"
 
 [dependencies]
 anyhow = "1.0"
+async-trait = "0.1"
 bitflags = "1.3"
 chrono = {version="0.4", features=["unstable-locales"]}
 clap = {version="3.1", features=["derive"]}

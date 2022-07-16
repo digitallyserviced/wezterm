@@ -5,38 +5,51 @@
 //! be rendered as a popup/context menu if the system supports it; at the
 //! time of writing our window layer doesn't provide an API for context
 //! menus.
+use crate::commands::ExpandedCommand;
 use crate::inputmap::InputMap;
 use crate::termwindow::TermWindowNotif;
-use config::configuration;
+use async_trait::async_trait;
 use config::keyassignment::{KeyAssignment, KeyTableEntry, SpawnCommand, SpawnTabDomain};
+use config::configuration;
+
+use downcast_rs::{impl_downcast, Downcast};
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
-use mux::domain::{DomainId, DomainState};
+use luahelper::impl_lua_conversion_dynamic;
+
+
+use mux::domain::{Domain, DomainId, DomainState};
 use mux::pane::PaneId;
 use mux::tab::{Tab, TabId};
 use mux::termwiztermtab::TermWizTerminal;
 use mux::window::WindowId;
 use mux::Mux;
-use std::collections::BTreeMap;
+use std::borrow::Borrow;
+
+
 use termwiz::cell::{AttributeChange, CellAttributes};
 use termwiz::color::ColorAttribute;
 use termwiz::input::{InputEvent, KeyCode, KeyEvent, Modifiers, MouseButtons, MouseEvent};
 use termwiz::surface::{Change, Position};
 use termwiz::terminal::Terminal;
 use termwiz_funcs::truncate_right;
+use wezterm_dynamic::{FromDynamic, ToDynamic};
+
 use window::WindowOps;
 
 pub use config::keyassignment::LauncherFlags;
 
 #[cfg_attr(feature = "use_serde", derive(Serialize, Deserialize))]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, ToDynamic, FromDynamic)]
 pub enum LauncherEntryType {
     Tab(LauncherTabEntry),
     Domain(LauncherDomainEntry),
     KeyAssignment(LauncherKeyEntry),
-    Workspace(Entry),
-    Normal(Entry),
+    Command(LauncherCommandEntry)
+    // Workspace(Entry),
+    // Normal(Entry),
 }
+impl_lua_conversion_dynamic!(LauncherEntryType);
 
 #[derive(Clone, Debug)]
 struct Entry {
@@ -44,48 +57,79 @@ struct Entry {
     pub action: KeyAssignment,
 }
 
-pub trait LauncherItem {
-    fn get_entry(&self, idx: usize) -> LauncherEntry;
-}
+// pub trait LauncherItems {
+//     fn get_entries(&self) -> Vec<LauncherEntry>;
+// }
 
-impl LauncherItem for Tab {
-    fn get_entry(&self, idx: usize) -> LauncherEntry {
-        LauncherEntry {
-            label: format!("{}. {} panes", self.get_title(), self.count_panes()),
-            action: KeyAssignment::ActivateTab(idx as isize),
-            launch_type: (LauncherEntryType::Tab(LauncherTabEntry {
-                title: self.get_title(),
-                tab_id: self.get_active_idx(),
-                tab_idx: idx,
-                pane_count: self.count_panes(),
-            })),
-        }
-    }
-    // add code here
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, ToDynamic, FromDynamic)]
 pub struct LauncherEntry {
     pub label: String,
     pub action: KeyAssignment,
     pub launch_type: LauncherEntryType,
 }
+impl_lua_conversion_dynamic!(LauncherEntry);
 
-// impl Entry {
-//     fn launch_type(&self) -> &LauncherEntryType {
-//         &self.launch_type
-//     }
-// }
+// #[async_trait(?Send)]
+impl LauncherEntry {
+    pub async fn new(label: String, action: KeyAssignment, launch_type: LauncherEntryType) -> Self {
+        let nlabel = config::with_lua_config_on_main_thread(|lua| async {
+            let lua = lua.ok_or_else(|| anyhow::anyhow!("missing lua context"))?;
+            let value = config::lua::emit_async_callback(
+                lua.borrow(),
+                (
+                    "format-launcher-item".to_string(),
+                    (label.clone(), action.clone(), launch_type.clone()),
+                ),
+            )
+            .await?;
+            let label: String = luahelper::from_lua_value_dynamic(value)?;
+            Ok(label)
+        })
+        .await;
 
-#[cfg_attr(feature = "use_serde", derive(Serialize, Deserialize))]
-#[derive(Clone, Debug)]
+        Self {
+            label: nlabel.unwrap(),
+            action,
+            launch_type,
+        }
+    }
+
+    // async fn format_launcher_item(mut self, _orig: String) {
+    //     let label = config::with_lua_config_on_main_thread(|lua| async {
+    //         let lua = lua.ok_or_else(|| anyhow::anyhow!("missing lua context"))?;
+    //         let value = config::lua::emit_async_callback(
+    //             lua.borrow(),
+    //             ("format-launcher-item".to_string(), (self.clone(),)),
+    //         )
+    //         .await?;
+    //         let label: String = luahelper::from_lua_value_dynamic(value)?;
+    //         Ok(label)
+    //     })
+    //     .await;
+    //     self.set_label(match label {
+    //         Ok(label) => label,
+    //         Err(err) => {
+    //             log::error!(
+    //                 "Error while calling label function for ExecDomain `{}`: {err:#}",
+    //                 self.label
+    //             );
+    //             self.label.to_string()
+    //         }
+    //     })
+    // }
+    //
+    // pub fn set_label(&mut self, label: String) {
+    //     self.label = label;
+    // }
+}
+#[derive(Clone, Debug, ToDynamic, FromDynamic)]
 pub struct LauncherKeyEntry {
-    pub code: KeyCode,
-    pub mods: Modifiers,
-    pub assignment: KeyTableEntry,
+    pub code: String,
+    pub mods: String,
+    pub assignment: KeyAssignment,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, ToDynamic, FromDynamic)]
 pub struct LauncherTabEntry {
     pub title: String,
     pub tab_id: TabId,
@@ -93,18 +137,164 @@ pub struct LauncherTabEntry {
     pub pane_count: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, ToDynamic, FromDynamic)]
 pub struct LauncherDomainEntry {
     pub domain_id: DomainId,
     pub name: String,
     pub state: DomainState,
     pub label: String,
 }
+impl_lua_conversion_dynamic!(LauncherDomainEntry);
 
+#[async_trait(?Send)]
+pub trait LauncherItem: Downcast {
+    async fn get_entry(&self, idx: usize) -> LauncherEntry;
+    async fn get_label(&self) -> String;
+    async fn get_action(&self) -> Option<KeyAssignment>;
+}
+impl_downcast!(LauncherItem);
+#[async_trait(?Send)]
+impl LauncherItem for dyn Domain {
+    async fn get_entry(&self, idx: usize) -> LauncherEntry {
+        let actionn = self.get_action().await.unwrap();
+        let label = self.get_label().await;
+        LauncherEntry::new(
+            label.clone(),
+            actionn,
+            LauncherEntryType::Domain(LauncherDomainEntry {
+                domain_id: self.domain_id(),
+                name: self.domain_name().to_string(),
+                state: self.state(),
+                label: "".to_string(),
+            }),
+        )
+        .await
+    }
+
+    async fn get_label(&self) -> String {
+        let name = self.domain_name();
+        let label = self.domain_label().await;
+        let label = if name == label || label == "" {
+            format!("domain `{}`", name)
+        } else {
+            format!("domain `{}` - {}", name, label)
+        };
+        label
+    }
+
+    async fn get_action(&self) -> Option<KeyAssignment> {
+        if let DomainState::Attached = self.state() {
+            Some(KeyAssignment::SpawnCommandInNewTab(SpawnCommand {
+                domain: SpawnTabDomain::DomainName(self.domain_name().to_string()),
+                ..SpawnCommand::default()
+            }))
+        } else {
+            Some(KeyAssignment::AttachDomain(self.domain_name().to_string()))
+        }
+    }
+    // add code here
+}
+// pub type KeyMapEntry = ((String, String), KeyTableEntry);
+#[async_trait(?Send)]
+impl LauncherItem for ((window::KeyCode, window::Modifiers), KeyTableEntry) {
+    async fn get_entry(&self, idx: usize) -> LauncherEntry {
+        let code = self.0 .0.clone();
+        let mods = self.0 .1.clone();
+        let label = self.get_label().await;
+        let action = self.get_action().await.unwrap();
+        LauncherEntry::new(
+            label,
+            action.clone(),
+            LauncherEntryType::KeyAssignment(LauncherKeyEntry {
+                code: code.to_string(),
+                mods: mods.to_string(),
+                assignment: action.clone(),
+            }),
+        )
+        .await
+    }
+
+    async fn get_label(&self) -> String {
+        format!(
+            "{:?} ({:?} {:?})",
+            self.1.action,
+            self.0 .1.clone(),
+            self.0 .0.clone()
+        )
+    }
+
+    async fn get_action(&self) -> Option<KeyAssignment> {
+        Some(self.1.clone().action)
+    }
+}
+#[async_trait(?Send)]
+impl LauncherItem for Tab {
+    async fn get_entry(&self, idx: usize) -> LauncherEntry {
+        let label = self.get_label().await;
+        let action = self.get_action().await.unwrap();
+        LauncherEntry::new(
+            label,
+            action,
+            LauncherEntryType::Tab(LauncherTabEntry {
+                title: self.get_title(),
+                tab_id: self.get_active_idx(),
+                tab_idx: idx,
+                pane_count: self.count_panes(),
+            }),
+        )
+        .await
+    }
+
+    async fn get_label(&self) -> String {
+        format!("{}. {} panes", self.get_title(), self.count_panes())
+    }
+
+    async fn get_action(&self) -> Option<KeyAssignment> {
+        Some(KeyAssignment::ActivateTab(self.tab_id() as isize))
+    }
+}
+
+#[derive(Clone, Debug, ToDynamic, FromDynamic)]
+pub struct LauncherCommandEntry {
+    brief:String,
+    doc: String,
+    keys: String,
+    action: KeyAssignment
+} 
+#[async_trait(?Send)]
+impl LauncherItem for ExpandedCommand {
+    async fn get_entry(&self, idx: usize) -> LauncherEntry {
+        let label = self.get_label().await;
+        let action = self.get_action().await.unwrap();
+        LauncherEntry::new(
+            label,
+            action.clone(),
+            LauncherEntryType::Command(
+                LauncherCommandEntry{
+                    brief: self.brief.to_string(),
+                    doc: self.doc.to_string(),
+                    keys: format!("{:?}", self.keys).to_string(),
+                    action: action.clone()
+                }
+                )
+        )
+        .await
+    }
+
+    async fn get_label(&self) -> String {
+format!("{}. {}", self.brief, self.doc)
+    }
+
+    async fn get_action(&self) -> Option<KeyAssignment> {
+        Some(self.action.clone())
+    }
+}
 pub struct LauncherArgs {
     flags: LauncherFlags,
-    domains: Vec<LauncherDomainEntry>,
-    tabs: Vec<LauncherTabEntry>,
+    domains: Vec<LauncherEntry>,
+    cmddefs: Vec<LauncherEntry>,
+    shortcuts: Vec<LauncherEntry>,
+    tabs: Vec<LauncherEntry>,
     entries: Vec<LauncherEntry>,
     pane_id: PaneId,
     domain_id_of_current_tab: DomainId,
@@ -131,44 +321,55 @@ impl LauncherArgs {
         } else {
             vec![]
         };
+            let config = configuration();
+            let mut cmddefs = vec![];
+        if flags.contains(LauncherFlags::COMMANDS) {
+            let commands = crate::commands::CommandDef::expanded_commands(&config);
+            for cmd in commands {
+                match &cmd.action {
+                    KeyAssignment::ActivateTabRelative(_) | KeyAssignment::ActivateTab(_) => continue,
+                    _ => {
+                        let entry = cmd.get_entry(0).await;
+                        cmddefs.push(entry);
+                    },
+                }
+            }
+        }
 
-        let entries = if flags.contains(LauncherFlags::TABS) {
-            // Ideally we'd resolve the tabs on the fly once we've started the
-            // overlay, but since the overlay runs in a different thread, accessing
-            // the mux list is a bit awkward.  To get the ball rolling we capture
-            // the list of tabs up front and live with a static list.
-            let window = mux
-                .get_window(mux_window_id)
-                .expect("to resolve my own window_id");
-            window
-                .iter()
-                .enumerate()
-                .map(|(tab_idx, tab)| tab.get_entry(tab_idx))
-                .collect()
-        } else {
-            vec![]
-        };
+            let mut key_entries: Vec<LauncherEntry> = vec![];
+        if flags.contains(LauncherFlags::KEY_ASSIGNMENTS) {
+            let input_map = InputMap::new(&config);
+            // Give a consistent order to the entries
+            let keys: Vec<((window::KeyCode, window::Modifiers), KeyTableEntry)> =
+                input_map.keys.default.into_iter().collect();
+            // let keys: BTreeMap<_, _> = input_map.keys.default.into_iter().collect();
+            // for ((keycode, mods), entry) in keys {
+            for keymap in keys {
+                let entry = match keymap.get_action().await.unwrap() {
+                    KeyAssignment::ActivateTabRelative(_) | KeyAssignment::ActivateTab(_) => {
+                        continue
+                    }
+                    action => match key_entries.iter().find(|ent| ent.action == action) {
+                        Some(_) => continue,
+                        None => keymap.get_entry(0 as usize).await,
+                    },
+                };
+                key_entries.push(entry);
+            }
+            key_entries.sort_by(|a, b| a.label.cmp(&b.label));
+        }
+        let entries = vec![];
         let tabs = if flags.contains(LauncherFlags::TABS) {
-            // Ideally we'd resolve the tabs on the fly once we've started the
-            // overlay, but since the overlay runs in a different thread, accessing
-            // the mux list is a bit awkward.  To get the ball rolling we capture
-            // the list of tabs up front and live with a static list.
+            let mut otabs = vec![];
             let window = mux
                 .get_window(mux_window_id)
                 .expect("to resolve my own window_id");
-            window
-                .iter()
-                .enumerate()
-                .map(|(tab_idx, tab)| LauncherTabEntry {
-                    title: tab
-                        .get_active_pane()
-                        .expect("tab to have a pane")
-                        .get_title(),
-                    tab_id: tab.tab_id(),
-                    tab_idx,
-                    pane_count: tab.count_panes(),
-                })
-                .collect()
+            let ttabs: Vec<(usize, &std::rc::Rc<Tab>)> = window.iter().enumerate().collect();
+            for (tab_idx, tab) in ttabs {
+                let entry = tab.get_entry(tab_idx).await;
+                otabs.push(entry);
+            }
+            otabs
         } else {
             vec![]
         };
@@ -190,20 +391,9 @@ impl LauncherArgs {
             });
             domains.retain(|dom| dom.spawnable());
             let mut d = vec![];
-            for dom in domains.into_iter() {
-                let name = dom.domain_name();
-                let label = dom.domain_label().await;
-                let label = if name == label || label == "" {
-                    format!("domain `{}`", name)
-                } else {
-                    format!("domain `{}` - {}", name, label)
-                };
-                d.push(LauncherDomainEntry {
-                    domain_id: dom.domain_id(),
-                    name: name.to_string(),
-                    state: dom.state(),
-                    label,
-                });
+            for dom in domains.iter() {
+                let entry = dom.get_entry(0).await;
+                d.push(entry)
             }
             d
         } else {
@@ -214,6 +404,8 @@ impl LauncherArgs {
             flags,
             domains,
             tabs,
+            cmddefs,
+            shortcuts: key_entries,
             entries,
             pane_id,
             domain_id_of_current_tab,
@@ -295,30 +487,9 @@ impl LauncherState {
         //     }
         // }
 
-        // for domain in &args.domains {
-        //     let entry = if domain.state == DomainState::Attached {
-        //         Entry {
-        //             label: format!("New Tab ({})", domain.label),
-        //             action: KeyAssignment::SpawnCommandInNewTab(SpawnCommand {
-        //                 domain: SpawnTabDomain::DomainName(domain.name.to_string()),
-        //                 ..SpawnCommand::default()
-        //             }),
-        //         }
-        //     } else {
-        //         Entry {
-        //             label: format!("Attach {}", domain.label),
-        //             action: KeyAssignment::AttachDomain(domain.name.to_string()),
-        //         }
-        //     };
-        //
-        //     // Preselect the entry that corresponds to the active tab
-        //     // at the time that the launcher was set up, so that pressing
-        //     // Enter immediately afterwards spawns a tab in the same domain.
-        //     if domain.domain_id == args.domain_id_of_current_tab {
-        //         self.active_idx = self.entries.len();
-        //     }
-        //     self.entries.push(entry);
-        // }
+        for domain in &args.domains {
+            self.entries.push(domain.clone());
+        }
 
         // if args.flags.contains(LauncherFlags::WORKSPACES) {
         //     for ws in &args.workspaces {
@@ -343,70 +514,20 @@ impl LauncherState {
         //         },
         //     });
         // }
+        for tab in &args.tabs {
+            self.entries.push(tab.to_owned());
+        }
 
         for entry in &args.entries {
             self.entries.push(entry.to_owned());
         }
 
-        // for tab in &args.tabs {
-        //     self.entries.push(Entry {
-        //         label: format!("{}. {} panes", tab.title, tab.pane_count),
-        //         action: KeyAssignment::ActivateTab(tab.tab_idx as isize),
-        //     });
-        // }
-        //
-        // if args.flags.contains(LauncherFlags::COMMANDS) {
-        //     let commands = crate::commands::CommandDef::expanded_commands(&config);
-        //     for cmd in commands {
-        //         if matches!(
-        //             &cmd.action,
-        //             KeyAssignment::ActivateTabRelative(_) | KeyAssignment::ActivateTab(_)
-        //         ) {
-        //             // Filter out some noisy, repetitive entries
-        //             continue;
-        //         }
-        //         self.entries.push(Entry {
-        //             label: format!("{}. {}", cmd.brief, cmd.doc),
-        //             action: cmd.action,
-        //         });
-        //     }
-        // }
-        //
-        // // Grab interesting key assignments and show those as a kind of command palette
-        // if args.flags.contains(LauncherFlags::KEY_ASSIGNMENTS) {
-        //     let input_map = InputMap::new(&config);
-        //     let mut key_entries: Vec<Entry> = vec![];
-        //     // Give a consistent order to the entries
-        //     let keys: BTreeMap<_, _> = input_map.keys.default.into_iter().collect();
-        //     for ((keycode, mods), entry) in keys {
-        //         if matches!(
-        //             &entry.action,
-        //             KeyAssignment::ActivateTabRelative(_) | KeyAssignment::ActivateTab(_)
-        //         ) {
-        //             // Filter out some noisy, repetitive entries
-        //             continue;
-        //         }
-        //         if key_entries
-        //             .iter()
-        //             .find(|ent| ent.action == entry.action)
-        //             .is_some()
-        //         {
-        //             // Avoid duplicate entries
-        //             continue;
-        //         }
-        //         key_entries.push(Entry {
-        //             label: format!(
-        //                 "{:?} ({} {})",
-        //                 entry.action,
-        //                 mods.to_string(),
-        //                 keycode.to_string().escape_debug()
-        //             ),
-        //             action: entry.action,
-        //         });
-        //     }
-        //     key_entries.sort_by(|a, b| a.label.cmp(&b.label));
-        //     self.entries.append(&mut key_entries);
-        // }
+        for cmd in &args.cmddefs {
+            self.entries.push(cmd.to_owned());
+        }
+        for shortcut in &args.shortcuts {
+            self.entries.push(shortcut.to_owned());
+        }
     }
 
     fn render(&mut self, term: &mut TermWizTerminal) -> termwiz::Result<()> {

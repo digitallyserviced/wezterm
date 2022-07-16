@@ -463,7 +463,6 @@ pub enum CopyModeAssignment {
     EditPattern,
     AcceptPattern,
 }
-
 pub type KeyTable = HashMap<(KeyCode, Modifiers), KeyTableEntry>;
 
 #[derive(Debug, Clone, Default)]
