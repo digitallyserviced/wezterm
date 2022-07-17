@@ -60,6 +60,7 @@ impl std::fmt::Debug for CellAttributes {
             .field("blink", &self.blink())
             .field("italic", &self.italic())
             .field("reverse", &self.reverse())
+            .field("alpha", &self.alpha())
             .field("strikethrough", &self.strikethrough())
             .field("invisible", &self.invisible())
             .field("wrapped", &self.wrapped())
@@ -249,6 +250,7 @@ impl CellAttributes {
     bitfield!(wrapped, set_wrapped, 11);
     bitfield!(overline, set_overline, 12);
     bitfield!(semantic_type, set_semantic_type, SemanticType, 0b11, 13);
+    bitfield!(alpha, set_alpha, 15);
 
     pub const fn blank() -> Self {
         Self {
@@ -947,6 +949,7 @@ pub enum AttributeChange {
     Italic(bool),
     Blink(Blink),
     Reverse(bool),
+    Alpha(bool),
     StrikeThrough(bool),
     Invisible(bool),
     Foreground(ColorAttribute),

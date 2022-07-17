@@ -9,14 +9,13 @@ use crate::commands::ExpandedCommand;
 use crate::inputmap::InputMap;
 use crate::termwindow::TermWindowNotif;
 use async_trait::async_trait;
-use config::keyassignment::{KeyAssignment, KeyTableEntry, SpawnCommand, SpawnTabDomain};
 use config::configuration;
+use config::keyassignment::{KeyAssignment, KeyTableEntry, SpawnCommand, SpawnTabDomain};
 
 use downcast_rs::{impl_downcast, Downcast};
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
 use luahelper::impl_lua_conversion_dynamic;
-
 
 use mux::domain::{Domain, DomainId, DomainState};
 use mux::pane::PaneId;
@@ -25,7 +24,6 @@ use mux::termwiztermtab::TermWizTerminal;
 use mux::window::WindowId;
 use mux::Mux;
 use std::borrow::Borrow;
-
 
 use termwiz::cell::{AttributeChange, CellAttributes};
 use termwiz::color::ColorAttribute;
@@ -45,9 +43,8 @@ pub enum LauncherEntryType {
     Tab(LauncherTabEntry),
     Domain(LauncherDomainEntry),
     KeyAssignment(LauncherKeyEntry),
-    Command(LauncherCommandEntry)
-    // Workspace(Entry),
-    // Normal(Entry),
+    Command(LauncherCommandEntry), // Workspace(Entry),
+                                   // Normal(Entry),
 }
 impl_lua_conversion_dynamic!(LauncherEntryType);
 
@@ -87,10 +84,25 @@ impl LauncherEntry {
         })
         .await;
 
-        Self {
-            label: nlabel.unwrap(),
-            action,
-            launch_type,
+        match nlabel {
+            Ok(nlabel) => Self {
+                label: nlabel,
+                action,
+                launch_type,
+            },
+            Err(err) => {
+                log::error!(
+                    "Error while calling label function launcher entry `{}` {:?} {:?}: {err:#}",
+                    label,
+                    action,
+                    launch_type
+                );
+                Self {
+                    label,
+                    action,
+                    launch_type,
+                }
+            }
         }
     }
 
@@ -256,11 +268,11 @@ impl LauncherItem for Tab {
 
 #[derive(Clone, Debug, ToDynamic, FromDynamic)]
 pub struct LauncherCommandEntry {
-    brief:String,
+    brief: String,
     doc: String,
     keys: String,
-    action: KeyAssignment
-} 
+    action: KeyAssignment,
+}
 #[async_trait(?Send)]
 impl LauncherItem for ExpandedCommand {
     async fn get_entry(&self, idx: usize) -> LauncherEntry {
@@ -269,20 +281,18 @@ impl LauncherItem for ExpandedCommand {
         LauncherEntry::new(
             label,
             action.clone(),
-            LauncherEntryType::Command(
-                LauncherCommandEntry{
-                    brief: self.brief.to_string(),
-                    doc: self.doc.to_string(),
-                    keys: format!("{:?}", self.keys).to_string(),
-                    action: action.clone()
-                }
-                )
+            LauncherEntryType::Command(LauncherCommandEntry {
+                brief: self.brief.to_string(),
+                doc: self.doc.to_string(),
+                keys: format!("{:?}", self.keys).to_string(),
+                action: action.clone(),
+            }),
         )
         .await
     }
 
     async fn get_label(&self) -> String {
-format!("{}. {}", self.brief, self.doc)
+        format!("{}. {}", self.brief, self.doc)
     }
 
     async fn get_action(&self) -> Option<KeyAssignment> {
@@ -321,22 +331,24 @@ impl LauncherArgs {
         } else {
             vec![]
         };
-            let config = configuration();
-            let mut cmddefs = vec![];
+        let config = configuration();
+        let mut cmddefs = vec![];
         if flags.contains(LauncherFlags::COMMANDS) {
             let commands = crate::commands::CommandDef::expanded_commands(&config);
             for cmd in commands {
                 match &cmd.action {
-                    KeyAssignment::ActivateTabRelative(_) | KeyAssignment::ActivateTab(_) => continue,
+                    KeyAssignment::ActivateTabRelative(_) | KeyAssignment::ActivateTab(_) => {
+                        continue
+                    }
                     _ => {
                         let entry = cmd.get_entry(0).await;
                         cmddefs.push(entry);
-                    },
+                    }
                 }
             }
         }
 
-            let mut key_entries: Vec<LauncherEntry> = vec![];
+        let mut key_entries: Vec<LauncherEntry> = vec![];
         if flags.contains(LauncherFlags::KEY_ASSIGNMENTS) {
             let input_map = InputMap::new(&config);
             // Give a consistent order to the entries

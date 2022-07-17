@@ -98,6 +98,10 @@ impl TerminfoRenderer {
                         attr_on!(Sgr::Blink(Blink::Slow));
                     }
 
+                    if attr.alpha() {
+                        attr_on!(Sgr::Alpha(true));
+                    }
+
                     if attr.reverse() {
                         attr_on!(EnterReverseMode, Sgr::Inverse(true));
                     }
@@ -414,6 +418,9 @@ impl TerminfoRenderer {
                 }
                 Change::Attribute(AttributeChange::Reverse(value)) => {
                     record!(set_reverse, value);
+                }
+                Change::Attribute(AttributeChange::Alpha(value)) => {
+                    record!(set_alpha, value);
                 }
                 Change::Attribute(AttributeChange::StrikeThrough(value)) => {
                     record!(set_strikethrough, value);

@@ -44,7 +44,6 @@ pub enum OperatingSystemCommand {
     CurrentWorkingDirectory(String),
     ResetColors(Vec<u8>),
     RxvtExtension(Vec<String>),
-
     Unspecified(Vec<Vec<u8>>),
 }
 
@@ -437,6 +436,7 @@ osc_entries!(
     RxvtProprietary = "777",
     FinalTermSemanticPrompt = "133",
     ITermProprietary = "1337",
+    WeztermProprietary = "4242",
     /// Here the "Sun" suffix comes from the table in
     /// <https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-Miscellaneous>
     /// that lays out various window related escape sequences.

@@ -2458,6 +2458,9 @@ impl TerminalState {
             Sgr::Inverse(inverse) => {
                 self.pen.set_reverse(inverse);
             }
+            Sgr::Alpha(alpha) => {
+                self.pen.set_alpha(alpha);
+            }
             Sgr::Invisible(invis) => {
                 self.pen.set_invisible(invis);
             }

@@ -1719,7 +1719,12 @@ impl super::TermWindow {
                 let bg_is_default = attrs.background() == ColorAttribute::Default;
                 let bg_color = params.palette.resolve_bg(attrs.background()).to_linear();
 
-                let fg_color = resolve_fg_color_attr(&attrs, attrs.foreground(), &params, style);
+                let alpha = match attrs.alpha() {
+                    true => self.config.text_background_opacity,
+                    false => 1.0
+                };
+
+                let fg_color = resolve_fg_color_attr(&attrs, attrs.foreground(), alpha, &params, style);
                 let (fg_color, bg_color, bg_is_default) = {
                     let mut fg = fg_color;
                     let mut bg = bg_color;
@@ -1766,9 +1771,13 @@ impl super::TermWindow {
                 };
 
                 let glyph_color = fg_color;
+                let alpha = match attrs.alpha() {
+                    true => self.config.text_background_opacity,
+                    false => 1.0
+                };
                 let underline_color = match attrs.underline_color() {
                     ColorAttribute::Default => fg_color,
-                    c => resolve_fg_color_attr(&attrs, c, &params, style),
+                    c => resolve_fg_color_attr(&attrs, c, alpha, &params, style),
                 };
 
                 let (bg_r, bg_g, bg_b, _) = bg_color.tuple();
@@ -1977,8 +1986,12 @@ impl super::TermWindow {
             let bg_is_default = attrs.background() == ColorAttribute::Default;
             let bg_color = params.palette.resolve_bg(attrs.background()).to_linear();
 
+                let alpha = match attrs.alpha() {
+                    true => self.config.text_background_opacity,
+                    false => 1.0
+                };
             let fg_color =
-                resolve_fg_color_attr(&attrs, attrs.foreground(), &params, &Default::default());
+                resolve_fg_color_attr(&attrs, attrs.foreground(), alpha, &params, &Default::default());
 
             let (bg_color, bg_is_default) = {
                 let mut fg = fg_color;
@@ -2069,8 +2082,12 @@ impl super::TermWindow {
                 let attrs = c.attrs();
                 let bg_color = params.palette.resolve_bg(attrs.background()).to_linear();
 
+                let alpha = match attrs.alpha() {
+                    true => self.config.text_background_opacity,
+                    false => 1.0
+                };
                 let fg_color =
-                    resolve_fg_color_attr(&attrs, attrs.foreground(), &params, &Default::default());
+                    resolve_fg_color_attr(&attrs, attrs.foreground(), alpha, &params, &Default::default());
 
                 (fg_color, bg_color)
             } else {
@@ -2869,10 +2886,11 @@ pub fn rgbcolor_alpha_to_window_color(color: RgbColor, alpha: f32) -> LinearRgba
 fn resolve_fg_color_attr(
     attrs: &CellAttributes,
     fg: ColorAttribute,
+    alpha: f32,
     params: &RenderScreenLineOpenGLParams,
     style: &config::TextStyle,
 ) -> LinearRgba {
-    match fg {
+    let mut fg_color = match fg {
         wezterm_term::color::ColorAttribute::Default => {
             if let Some(fg) = style.foreground {
                 fg.into()
@@ -2897,5 +2915,7 @@ fn resolve_fg_color_attr(
         }
         _ => params.palette.resolve_fg(fg),
     }
-    .to_linear()
+    .to_linear();
+    fg_color.3 = alpha;
+    fg_color
 }

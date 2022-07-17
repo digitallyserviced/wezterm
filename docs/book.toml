@@ -18,10 +18,15 @@ additional-js = ["mermaid.min.js", "mermaid-init.js", "asciinema-player.min.js"]
 enable = true
 level = 1
 
-[output.linkcheck]
-traverse-parent-directories = false
-
 [preprocessor]
 
 [preprocessor.mermaid]
 command = "mdbook-mermaid"
+
+[preprocessor.formatter]
+command = "/home/chris/Documents/mdbook-mermaid/target/debug/mdbook-mermaid"
+format = ["lua"]
+
+
+[formatter.lua]
+command = "stylua"

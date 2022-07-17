@@ -475,6 +475,9 @@ impl Surface {
             Blink(value) => {
                 self.attributes.set_blink(*value);
             }
+            Alpha(value) => {
+                self.attributes.set_alpha(*value);
+            }
             Reverse(value) => {
                 self.attributes.set_reverse(*value);
             }

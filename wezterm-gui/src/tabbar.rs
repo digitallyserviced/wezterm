@@ -437,6 +437,9 @@ pub fn parse_status_text(text: &str, default_cell: CellAttributes) -> Line {
                         Sgr::Inverse(inverse) => {
                             pen.set_reverse(inverse);
                         }
+                        Sgr::Alpha(alpha) => {
+                            pen.set_alpha(alpha);
+                        }
                         Sgr::Invisible(invis) => {
                             pen.set_invisible(invis);
                         }
