@@ -49,6 +49,32 @@ where
     (tw_tab, Box::pin(future))
 }
 
+pub fn start_float_overlay<T, F>(
+    term_window: &TermWindow,
+    tab: &Rc<Tab>,
+    size: TerminalSize,
+    func: F,
+) -> (
+    Rc<dyn Pane>,
+    Pin<Box<dyn std::future::Future<Output = anyhow::Result<T>>>>,
+)
+where
+    T: Send + 'static,
+    F: Send + 'static + FnOnce(PaneId, TermWizTerminal) -> anyhow::Result<T>,
+{
+    let (tw_term, tw_tab) = allocate(size);
+
+    let window = term_window.window.clone().unwrap();
+
+    let future = promise::spawn::spawn_into_new_thread(move || {
+        let res = func(pane_id, tw_term);
+        TermWindow::schedule_cancel_overlay_for_pane(window, pane_id);
+        res
+    });
+
+    (tw_tab, Box::pin(future))
+}
+
 pub fn start_overlay_pane<T, F>(
     term_window: &TermWindow,
     pane: &Rc<dyn Pane>,

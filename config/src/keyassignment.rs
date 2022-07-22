@@ -1,5 +1,7 @@
 use crate::keys::KeyNoAction;
 use luahelper::impl_lua_conversion_dynamic;
+use luahelper::ValuePrinter;
+use mlua::Function;
 use ordered_float::NotNan;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -279,6 +281,15 @@ impl Default for PaneSelectMode {
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, FromDynamic, ToDynamic)]
+pub struct FloaterArguments {
+    #[dynamic(default)]
+    pub rows: usize,
+    #[dynamic(default)]
+    pub cols: usize,
+    pub event_name: 
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Eq, FromDynamic, ToDynamic)]
 pub struct PaneSelectArguments {
     /// Overrides the main quick_select_alphabet config
     #[dynamic(default)]
@@ -399,6 +410,7 @@ pub enum KeyAssignment {
     RotatePanes(RotationDirection),
     SplitPane(SplitPane),
     PaneSelect(PaneSelectArguments),
+    OpenFloater(FloaterArguments),
 }
 impl_lua_conversion_dynamic!(KeyAssignment);
 
