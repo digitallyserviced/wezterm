@@ -127,6 +127,113 @@ impl LineEditorHost for LuaReplHost {
     }
 }
 
+pub fn floater<'lua>(
+    lua: &'lua Lua,
+    (name, handler, focus): (String, mlua::Function, Option<mlua::Value>),
+) -> mlua::Result<ExecDomain> {
+
+    let thread: Thread = lua.create_thread(handler).expect("Floater function not a coroutine.");
+
+    loop {
+        match Some(event) = 
+        match thread.resume(match) {
+            Some(expr) => expr,
+            None => expr,
+        }
+    }
+    let thread: Thread = lua.load(r#"
+        coroutine.create(function(arg)
+            assert(arg == 42)
+            local yieldarg = coroutine.yield(123)
+            assert(yieldarg == 43)
+            return 987
+        end)
+    "#).eval()?;
+    
+    assert_eq!(thread.resume::<_, u32>(42)?, 123);
+    assert_eq!(thread.resume::<_, u32>(43)?, 987);
+    
+    // The coroutine has now returned, so `resume` will fail
+    match thread.resume::<_, u32>(()) {
+        Err(Error::CoroutineInactive) => {},
+        unexpected => panic!("unexpected result {:?}", unexpected),
+    }
+
+    let handler = {
+        let event_name = format!("floater-{name}");
+        register_event(lua, (event_name.clone(), handler))?;
+        event_name
+    };
+
+    // let label = match label {
+    //     Some(Value::Function(callback)) => {
+    //         let event_name = format!("exec-domain-{name}-label");
+    //         register_event(lua, (event_name.clone(), callback))?;
+    //         Some(ValueOrFunc::Func(event_name))
+    //     }
+    //     Some(Value::String(value)) => Some(ValueOrFunc::Value(lua_value_to_dynamic(
+    //         Value::String(value),
+    //     )?)),
+    //     Some(_) => {
+    //         return Err(mlua::Error::external(
+    //             "label function parameter must be either a string or a lua function",
+    //         ))
+    //     }
+    //     None => None,
+    // };
+    Ok(())
+    // Ok(ExecDomain {
+    //     name,
+    //     fixup_command,
+    //     label,
+    // })
+}
+pub fn user_floater_overlay(mut term: TermWizTerminal) -> anyhow::Result<()> {
+    term.no_grab_mouse_in_raw_mode();
+
+    let config::LoadedConfig { lua, .. } = config::Config::load();
+    // Try hard to fall back to some kind of working lua context even
+    // if the user's config file is temporarily out of whack
+    let lua = match lua {
+        Some(lua) => lua,
+        None => match config::Config::try_default() {
+            Ok(config::LoadedConfig { lua: Some(lua), .. }) => lua,
+            _ => config::lua::make_lua_context(std::path::Path::new(""))?,
+        },
+    };
+
+    term.render(&[Change::Title("Debug".to_string())])?;
+
+
+    loop {
+        if let Some(line) = editor.read_line(host.as_mut().unwrap())? {
+            if line.is_empty() {
+                continue;
+            }
+            host.as_mut().unwrap().add_history(&line);
+
+            let passed_host = host.take().unwrap();
+
+            let (host_res, text) =
+                smol::block_on(promise::spawn::spawn_into_main_thread(async move {
+                    evaluate_trampoline(passed_host, line)
+                        .recv()
+                        .await
+                        .map_err(|e| mlua::Error::external(format!("{:#}", e)))
+                        .expect("returning result not to fail")
+                }));
+
+            host.replace(host_res);
+
+            if text != "nil" {
+                term.render(&[Change::Text(format!("{}\r\n", text.replace("\n", "\r\n")))])?;
+            }
+        } else {
+            return Ok(());
+        }
+    }
+}
+
 pub fn show_debug_overlay(mut term: TermWizTerminal, gui_win: GuiWin) -> anyhow::Result<()> {
     term.no_grab_mouse_in_raw_mode();
 

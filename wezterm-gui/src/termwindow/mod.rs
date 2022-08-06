@@ -9,7 +9,7 @@ use crate::inputmap::InputMap;
 use crate::overlay::{
     confirm_close_pane, confirm_close_tab, confirm_close_window, confirm_quit_program, launcher,
     start_overlay, start_overlay_pane, CopyModeParams, CopyOverlay, LauncherArgs, LauncherFlags,
-    QuickSelectOverlay,
+    QuickSelectOverlay, start_float_overlay,
 };
 use crate::scripting::guiwin::GuiWin;
 use crate::scripting::pane::PaneObject;
@@ -1799,6 +1799,46 @@ impl TermWindow {
 
         Ok(())
     }
+    fn float_overlay(&mut self, cols: usize, rows: usize) {
+        let mux_window_id = self.mux_window_id;
+        let mux = Mux::get().unwrap();
+        let tab = match mux.get_active_tab_for_window(mux_window_id) {
+            Some(tab) => tab,
+            None => return,
+        };
+        let pane = match tab.get_active_pane() {
+            Some(p) => p,
+            None => return,
+        };
+        let window = self.window.as_ref().unwrap().clone();
+
+        // window.clone().set_window_position
+        promise::spawn::spawn(async move {
+            let win = window.clone();
+            win.notify(TermWindowNotif::Apply(Box::new(move |term_window| {
+
+                if let tab = tab.clone() {
+                    let window = window.clone();
+                    let dims = tab.get_size();
+                    let size = TerminalSize {
+                        cols,
+                        rows,
+                        pixel_width: dims.pixel_width as usize * cols,
+                        pixel_height: dims.pixel_height as usize * rows,
+                        dpi: dims.dpi,
+                    };
+                    let (overlay, future) =
+                        start_float_overlay(&term_window, &tab, size, move |_tab_id, term| {
+                            crate::overlay::debug::user_floater_overlay(term)
+                        });
+
+                    term_window.assign_overlay(tab.tab_id(), overlay);
+                    promise::spawn::spawn(future).detach();
+                }
+            })));
+        })
+        .detach();
+    }
 
     fn show_debug_overlay(&mut self) {
         let mux = Mux::get().unwrap();
@@ -1853,6 +1893,7 @@ impl TermWindow {
         let pane_id = pane.pane_id();
         let tab_id = tab.tab_id();
         let title = title.to_string();
+        let window = self.window.as_ref().unwrap().clone();
 
         promise::spawn::spawn(async move {
             let args = LauncherArgs::new(
